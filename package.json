@@ -23,10 +23,13 @@
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/schedule": "^6.1.1",
+    "@nestjs/websockets": "^11.1.13",
     "ioredis": "^5.9.2",
     "pg": "^8.18.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "yahoo-finance2": "^3.13.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
