@@ -1,0 +1,14 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "outDir": "../../dist/apps/user-service"
+    },
+    "include": [
+        "src/**/*",
+        "../../libs/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}

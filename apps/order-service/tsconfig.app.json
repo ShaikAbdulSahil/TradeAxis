@@ -1,0 +1,14 @@
+{
+    "extends": "../../tsconfig.json",
+    "compilerOptions": {
+        "outDir": "../../dist/apps/order-service"
+    },
+    "include": [
+        "src/**/*",
+        "../../libs/**/*"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
+}

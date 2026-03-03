@@ -1,0 +1,132 @@
+-- Enable UUID extension for secure, unique identifiers
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+---
+--- 1. INSTRUMENTS (Market Data)
+---
+CREATE TABLE instruments (
+    id SERIAL PRIMARY KEY,
+    instrument_token INTEGER UNIQUE NOT NULL, -- The ID used by Kite for ticks
+    exchange_token VARCHAR(20),
+    tradingsymbol VARCHAR(50) NOT NULL,
+    name VARCHAR(100),
+    exchange VARCHAR(10) NOT NULL, -- NSE, NFO, etc.
+    segment VARCHAR(20),
+    tick_size DECIMAL(10, 4),
+    lot_size INTEGER,
+    instrument_type VARCHAR(10), -- EQ, CE, PE, FUT
+    expiry DATE,
+    strike_price DECIMAL(10, 2),
+    -- High-performance search vector
+    search_vector tsvector
+);
+
+-- Indexes for lightning-fast search and lookups
+CREATE INDEX idx_instruments_token ON instruments(instrument_token);
+CREATE INDEX idx_instruments_search ON instruments USING GIN(search_vector);
+
+---
+--- 2. USERS & AUTH
+---
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    full_name VARCHAR(100),
+    status VARCHAR(20) DEFAULT 'ACTIVE', -- ACTIVE, LOCKED_BY_ADMIN, SUSPENDED
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+---
+--- 3. WALLETS & VIRTUAL CAPITAL
+---
+CREATE TABLE wallets (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    balance DECIMAL(15, 2) DEFAULT 100000.00, -- Default virtual money
+    blocked_margin DECIMAL(15, 2) DEFAULT 0.00, -- Money in PENDING orders
+    is_frozen BOOLEAN DEFAULT FALSE,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE wallet_transactions (
+    id SERIAL PRIMARY KEY,
+    wallet_id UUID REFERENCES wallets(id) ON DELETE CASCADE,
+    amount DECIMAL(15, 2) NOT NULL,
+    type VARCHAR(30), -- TRADE_PROFIT, TRADE_LOSS, BROKERAGE, VIRTUAL_DEPOSIT
+    order_id UUID, -- Optional link to a specific order
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+---
+--- 4. WATCHLIST (IMPLICIT, ONE PER USER)
+---
+CREATE TABLE watchlist_items (
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    instrument_token INTEGER REFERENCES instruments(instrument_token) ON DELETE CASCADE,
+    added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, instrument_token)
+);
+
+---
+--- 5. TRADING (Orders & Positions)
+---
+CREATE TABLE orders (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    instrument_token INTEGER REFERENCES instruments(instrument_token),
+    transaction_type VARCHAR(10) NOT NULL, -- BUY, SELL
+    order_type VARCHAR(20) NOT NULL, -- MARKET, LIMIT, SL
+    status VARCHAR(20) DEFAULT 'PENDING', -- PENDING, COMPLETE, REJECTED, CANCELLED
+    quantity INTEGER NOT NULL,
+    price DECIMAL(10, 2), -- Target price
+    average_price DECIMAL(10, 2), -- Execution price
+    placed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE TABLE positions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    instrument_token INTEGER REFERENCES instruments(instrument_token),
+    quantity INTEGER NOT NULL, -- Positive for Long, Negative for Short
+    average_price DECIMAL(10, 2) NOT NULL,
+    realized_pnl DECIMAL(15, 2) DEFAULT 0.00,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (user_id, instrument_token)
+);
+
+---
+--- 6. NOTIFICATIONS
+---
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    type VARCHAR(20), -- ORDER_UPDATE, SYSTEM
+    title VARCHAR(100),
+    message TEXT,
+    is_read BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+---
+--- 7. TRIGGERS (Automations)
+---
+
+-- Automatic Search Vector Updates
+CREATE FUNCTION instruments_search_trigger()
+RETURNS trigger AS $$
+BEGIN
+  NEW.search_vector :=
+    to_tsvector(
+      'english',
+      coalesce(NEW.name, '') || ' ' || coalesce(NEW.tradingsymbol, '')
+    );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_instruments_search
+BEFORE INSERT OR UPDATE ON instruments
+FOR EACH ROW
+EXECUTE FUNCTION instruments_search_trigger();
